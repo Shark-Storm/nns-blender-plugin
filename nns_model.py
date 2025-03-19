@@ -26,10 +26,14 @@ class NitroModelInfo():
 
 
 class NitroModelBoxTest():
-    def __init__(self):
-        box = get_all_max_min()
-        self.xyz = box['min']
-        self.whd = box['max'] - box['min']
+    def __init__(self, magnify):
+        box = get_all_max_min(magnify)
+        xyz = box['min']
+        whd = box['max'] - box['min']
+
+        #Apply root rotation
+        self.xyz = Vector([xyz.x, -xyz.z, xyz.y])
+        self.whd = Vector([whd.x, whd.z, whd.y])
 
         max_whd = abs(max(self.whd.x, self.whd.y, self.whd.z))
         min_xyz = abs(min(self.xyz.x, self.xyz.y, self.xyz.z))
@@ -158,12 +162,6 @@ class NitroModelMaterial():
                     texture = model.find_texture(path)
                     self.image_idx = texture.index
                     self.palette_idx = texture.palette_idx
-
-                for i in material.nns_texframe_reference:
-
-                    fPath=os.path.realpath(bpy.path.abspath(i.image.filepath))
-                    model.find_texture(fPath)
-
         else:
             # For now let's use PrincipledBSDF to get the color and image.
             wrap = node_shader_utils.PrincipledBSDFWrapper(material)
@@ -297,9 +295,8 @@ class NitroModelMtxPrim():
         if len(obj.data.vertex_colors) > 0 and "vc" in material.type:
             self.parent_polygon.use_clr = True
 
-        if material.image_idx != -1 and "tx" in material.type \
-                and material.tex_gen_mode != "nrm" \
-                and material.tex_gen_st_src != "material":
+        if material.image_idx != -1 and "tx" in material.type and \
+                material.tex_gen_mode != "nrm":
             self.parent_polygon.use_tex = True
 
         if ((material.light0 == 'on' or
@@ -322,9 +319,6 @@ class NitroModelMtxPrim():
                 matrix = model.find_matrix_by_node_name(name)
             else:
                 matrix = model.find_matrix_by_node_name(obj.name)
-
-            node = model.find_node_by_index(matrix.node_idx)
-            node.draw_mtx = True
 
             # Add mtx command.
             if matrix is not None and primitive._previous_mtx != matrix.index:
@@ -468,19 +462,12 @@ class NitroModelNode():
         self.scale = (1, 1, 1)
         self.rotate = (0, 0, 0)
         self.translate = (0, 0, 0)
-        self.mtx = None
         self.visibility = True
         self.displays = []
         self.vertex_size = 0
         self.polygon_size = 0
         self.triangle_size = 0
         self.quad_size = 0
-
-    def set_scale_rot_trans(self, mag):
-        euler = self.mtx.to_euler('XYZ')
-        self.rotate = [decimal.Decimal(math.degrees(e)) for e in euler]
-        self.translate = self.mtx.to_translation() * mag
-        self.scale = self.mtx.to_scale()
 
     def collect_statistics(self, model):
         for display in self.displays:
@@ -520,7 +507,7 @@ class NitroModelOutputInfo():
 class NitroModel():
     def __init__(self, settings):
         self.info = NitroModelInfo()
-        self.box_test = NitroModelBoxTest()
+        self.box_test = NitroModelBoxTest(magnify = settings['imd_magnification'])
         self.textures = []
         self.palettes = []
         self.materials = []
@@ -533,7 +520,7 @@ class NitroModel():
         self.primitives = []
 
     def collect(self):
-        if self.settings['imd_compress_nodes'] in ['none', 'cull', 'merge']:
+        if self.settings['imd_compress_nodes'] == 'none':
             self.collect_none()
         elif self.settings['imd_compress_nodes'] == 'unite':
             self.collect_unite()
@@ -547,24 +534,22 @@ class NitroModel():
                 mtx_prim.primitives.sort(key=lambda x: x.sort_key)
         for node in self.nodes:
             node.collect_statistics(self)
-
-        # Optimise polygons.
-        for polygon in self.polygons:
-            polygon.optimize()
-
+        self.optimize_polygons()
         self.output_info.collect(self)
 
     def collect_none(self):
-        root = self.find_node('root_scene')
-        root.rotate = (-90, 0, 0)
+        #root = self.find_node('root_scene')
+        #root.rotate = (-90, 0, 0)
         root_objects = []
         for obj in bpy.context.view_layer.objects:
             if obj.parent:
+                print(obj.name + ' has parent')
                 continue
             if obj.type in ['EMPTY', 'ARMATURE', 'MESH']:
+                print(obj.name + ' has no parent')
                 root_objects.append(obj)
-        children = self.process_children(root, root_objects)
-        root.child = children[0].index
+        children = self.process_children(None, root_objects)
+        #root.child = children[0].index
         self.apply_transformations()
         self.info.calculate()
         for item in self.primitives:
@@ -573,31 +558,6 @@ class NitroModel():
                 item['obj'],
                 item['node'],
             )
-
-        if self.settings['imd_compress_nodes'] in ['cull', 'merge']:
-            self.cull_nodes()
-
-    def cull_nodes(self):
-        root = self.find_node('root_scene')
-        while True:
-            node = self.get_childless_node()
-            if node is not None:
-                root.displays = node.displays
-                self.remove_node(node)
-            else:
-                break
-        child = self.find_node_by_index(root.child)
-        if child.brother_next == -1:
-            mtx = Matrix.Rotation(math.radians(-90), 4, 'X')
-            child.mtx = mtx @ child.mtx
-            child.set_scale_rot_trans(self.settings['imd_magnification'])
-            child.displays = root.displays
-            child.parent = -1
-            self.nodes.remove(root)
-        idx = 0
-        for node in self.nodes:
-            self.node_replace_index(node, idx)
-            idx += 1
 
     def collect_unite(self):
         root = self.find_node('root_scene')
@@ -660,6 +620,10 @@ class NitroModel():
             display = node.find_display(material.index, polygon.index)
             display.polygon = polygon.index
 
+    def optimize_polygons(self):
+        for polygon in self.polygons:
+            polygon.optimize()
+
     def apply_transformations(self):
         for item in self.primitives:
             obj = item['obj']
@@ -669,7 +633,7 @@ class NitroModel():
                     if self.settings['imd_compress_nodes'] in ['unite', 'unite_combine']:
                         transform = axis_conversion(
                             to_forward='-Z', to_up='Y').to_4x4()
-                        transform = transform @ obj.matrix_world
+                        transform = obj.matrix_world @ transform
                         vertex = transform @ vertex
                     else:
                         matrix = None
@@ -688,7 +652,7 @@ class NitroModel():
                         normal = primitive.normals[idx].to_vector()
                         transform = axis_conversion(
                             to_forward='-Z', to_up='Y').to_4x4()
-                        transform = transform @ obj.matrix_world
+                        transform = obj.matrix_world @ transform
                         quat = transform.to_quaternion()
                         normal = quat @ normal
                         primitive.normals[idx] = vector_to_vecfx10(normal)
@@ -715,10 +679,26 @@ class NitroModel():
 
             node = self.find_node(obj.name)
 
+            # TRIFINDO: Custom code
+            if parent is None:
+                node.rotate = (-90, 0, 0)
+            else:
+                node.rotate = (0, 0, 0)
+
             # Transform, is equal for all objects.
-            # Also store the matrix for culling and merging.
-            node.mtx = obj.matrix_basis
-            node.set_scale_rot_trans(self.settings['imd_magnification'])
+            euler = obj.matrix_local.to_euler('XYZ')
+            #node.rotate = [decimal.Decimal(math.degrees(e)) for e in euler]
+            node.rotate = [x + y for x, y in zip(node.rotate, [decimal.Decimal(math.degrees(e)) for e in euler])]
+            mag = self.settings['imd_magnification']
+            node.translate = obj.matrix_local.to_translation() * mag
+            node.scale = obj.matrix_local.to_scale()
+
+            
+            print(node.name)
+            print(node.rotate)
+            print(node.translate)
+            print(node.scale)
+            print("-----------")
 
             if obj.type == 'EMPTY':
                 children = self.process_children(node, obj.children)
@@ -752,17 +732,16 @@ class NitroModel():
             elif obj.type == 'MESH':
                 node.kind = 'mesh'
                 node.billboard = obj.nns_billboard
-                if node.billboard in ['on', 'y_on']:
-                    # Not sure if this is a good fix.
-                    mtx = Matrix.Rotation(math.radians(-90), 4, 'X')
-                    node.mtx = node.mtx @ mtx
-                    node.set_scale_rot_trans(self.settings['imd_magnification'])
                 self.process_mesh(node, obj)
                 children = self.process_children(node, obj.children)
                 if children:
                     node.child = children[0].index
 
-            node.parent = parent.index
+            if parent is not None:
+                node.parent = parent.index
+            else:
+                node.parent = -1
+            
             brothers.append(node)
 
         length = len(brothers)
@@ -785,16 +764,17 @@ class NitroModel():
             # Make matrix for node.
             self.find_matrix(node.index, bone.matrix_local.copy())
 
-            # Calculate transform.
+            # Transform.
             transform = bone.matrix_local if bone else Matrix.Identity(4)
             if bone and bone.parent:
                 transform = bone.parent.matrix_local.inverted() @ transform
 
-            # Transform node.
+            # Translate bone.
             euler = transform.to_euler('XYZ')
             node.rotate = [decimal.Decimal(math.degrees(e)) for e in euler]
             mag = self.settings['imd_magnification']
             node.translate = transform.to_translation() * mag
+            # TODO: scale for bones.
 
             # Get children.
             children = self.process_bones(node, bone.children)
@@ -817,9 +797,14 @@ class NitroModel():
     def process_mesh(self, node, obj):
         primitives = []
 
-        # fix copied from fast64 repo, in blender version 4.1 func was removed, in 4.1+ normals are always calculated
-        if bpy.app.version < (4, 1, 0):
-            obj.data.calc_normals_split()
+        # Recalculate normals to ensure consistency
+        if obj.type == 'MESH':
+            # Switch to Edit Mode to recalculate normals
+            bpy.context.view_layer.objects.active = obj
+            bpy.ops.object.mode_set(mode='EDIT')
+            bpy.ops.mesh.select_all(action='SELECT')
+            bpy.ops.mesh.normals_make_consistent(inside=False)  # Optionally adjust for inside/outside normals
+            bpy.ops.object.mode_set(mode='OBJECT')
 
         for polygon in obj.data.polygons:
             if len(polygon.loop_indices) > 4:
@@ -884,50 +869,6 @@ class NitroModel():
                 return matrix
         return self.find_matrix(node.index, Matrix.Identity(4))
 
-    def get_childless_node(self):
-        for node in self.nodes:
-            if node.child == -1 and not self.node_has_matrix(node):
-                return node
-        return None
-
-    def remove_node(self, node):
-        for other in self.nodes:
-            if other.child == node.index:
-                if node.brother_next == -1:
-                    other.child = -1
-                else:
-                    other.child = node.brother_next
-            if other.brother_next == node.index:
-                other.brother_next = node.brother_next
-            if other.brother_prev == node.index:
-                other.brother_prev = node.brother_prev
-            if other.parent == node.index:
-                raise Exception("Attempting to delete a parent node")
-        self.nodes.remove(node)
-
-    def node_replace_index(self, node, index):
-        for other in self.nodes:
-            if other.index == node.index:
-                continue
-            if other.child == node.index:
-                other.child = index
-            if other.brother_next == node.index:
-                other.brother_next = index
-            if other.brother_prev == node.index:
-                other.brother_prev = index
-            if other.parent == node.index:
-                other.parent = index
-        for matrix in self.matrices:
-            if matrix.node_idx == node.index:
-                matrix.node_idx = index
-        node.index = index
-
-    def node_has_matrix(self, node):
-        for matrix in self.matrices:
-            if matrix.node_idx == node.index:
-                return True
-        return False
-
     def find_polygon(self, name):
         for polygon in self.polygons:
             if polygon.name == name:
@@ -943,9 +884,3 @@ class NitroModel():
         index = len(self.nodes)
         self.nodes.append(NitroModelNode(index, name))
         return self.nodes[-1]
-
-    def find_node_by_index(self, index):
-        for node in self.nodes:
-            if node.index == index:
-                return node
-        return None
