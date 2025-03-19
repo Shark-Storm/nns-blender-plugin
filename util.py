@@ -2,18 +2,6 @@ import bpy
 from mathutils import Vector
 
 
-def get_color_from_obj(obj, idx):
-    """
-    This function exists because we cannot trust blender to have the vertex colors
-    to be aligned with the vertex loops. Possibly this happens when you import a
-    wrong model.
-    """
-    if len(obj.data.vertex_colors[0].data) <= idx:
-        return (0, 0, 0)
-    else:
-        return obj.data.vertex_colors[0].data[idx].color
-
-
 def is_pos_s(vecfx32):
     return (
         (vecfx32.x & 0x3F) == 0 and
@@ -40,34 +28,34 @@ def calculate_pos_scale(max_coord):
     return pos_scale
 
 
-def get_object_max_min(obj):
+def get_object_max_min(obj, magnify):
     matrix = obj.matrix_world
     bounds = [matrix @ Vector(v) for v in obj.bound_box]
     return {
-        'min': bounds[0],
-        'max': bounds[6]
+        'min': bounds[0] * magnify,
+        'max': bounds[6] * magnify
     }
 
 
-def get_all_max_min():
+def get_all_max_min(magnify):
     min_p = Vector([float('inf'), float('inf'), float('inf')])
     max_p = Vector([-float('inf'), -float('inf'), -float('inf')])
     for obj in bpy.context.view_layer.objects:
         if obj.type != 'MESH':
             continue
-        max_min = get_object_max_min(obj)
+        max_min = get_object_max_min(obj, magnify)
         # Max
         max_p.x = max(max_p.x, max_min['max'].x)
         max_p.x = max(max_p.x, max_min['min'].x)
         max_p.y = max(max_p.y, max_min['max'].y)
-        max_p.y = max(max_p.y, max_min['min'].y)
-        max_p.z = max(max_p.z, max_min['max'].z)
-        max_p.z = max(max_p.z, max_min['min'].z)
+        max_p.y = max(max_p.y, max_min['min'].y) 
+        max_p.z = max(max_p.z, max_min['max'].z) 
+        max_p.z = max(max_p.z, max_min['min'].z) 
         # Min
-        min_p.x = min(min_p.x, max_min['min'].x)
-        min_p.x = min(min_p.x, max_min['max'].x)
+        min_p.x = min(min_p.x, max_min['min'].x) 
+        min_p.x = min(min_p.x, max_min['max'].x) 
         min_p.y = min(min_p.y, max_min['min'].y)
-        min_p.y = min(min_p.y, max_min['max'].y)
+        min_p.y = min(min_p.y, max_min['max'].y) 
         min_p.z = min(min_p.z, max_min['min'].z)
         min_p.z = min(min_p.z, max_min['max'].z)
 
@@ -139,13 +127,14 @@ class Vecfx10():
         ])
 
     def __eq__(self, other):
-        if other is None:
+        try:
+            return (
+                self.x == other.x
+                and self.y == other.y
+                and self.z == other.z
+            )
+        except:
             return False
-        return (
-            self.x == other.x
-            and self.y == other.y
-            and self.z == other.z
-        )
 
 
 class VecFx32(object):
