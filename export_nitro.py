@@ -1,9 +1,9 @@
 import xml.etree.ElementTree as ET
 from xml.dom import minidom
 from . import local_logger as logger
+from bpy_extras.io_utils import axis_conversion
+from mathutils import Matrix
 from .nns_model import NitroModel
-import os
-from .version import get_version_str
 
 
 def generate_header(imd, data_name):
@@ -15,7 +15,7 @@ def generate_header(imd, data_name):
 
     generator = ET.SubElement(head, 'generator')
     generator.set('name', 'Nitro plugin for Blender 2.8')
-    generator.set('version', get_version_str())
+    generator.set('version', '0.1.0')
 
 
 def generate_imd(settings, model):
@@ -75,45 +75,19 @@ def generate_ica(settings, model):
         f.write(output)
 
 
-def generate_itp(settings, model):
-    from . import export_itp
-
-    itp = ET.Element('itp')
-    generate_header(itp, 'Texture Pattern Animation Data')
-    body = ET.SubElement(itp, 'body')
-    export_itp.generate_body(body, model, settings)
-
-    output = ""
-    if settings['pretty_print']:
-        output = minidom.parseString(ET.tostring(itp, encoding='unicode'))
-        output = output.toprettyxml(indent='   ')
-    else:
-        output = ET.tostring(itp, encoding='unicode')
-
-    with open(settings['filepath'] + '.itp', 'w') as f:
-        f.write(output)
-
-
 def save(context, settings):
-
-    settings['filepath'] = os.path.splitext(settings['filepath'])[0]
 
     logger.create_log(settings['filepath'], settings['generate_log'])
 
     model = None
 
-    if (settings['imd_export']
-       or settings['ica_export']
-       or settings['itp_export']):
+    if settings['imd_export'] or settings['ica_export']:
         model = NitroModel(settings)
         model.collect()
 
+    if settings['imd_export']:
+        generate_imd(settings, model)
     if settings['ita_export']:
         generate_ita(settings)
     if settings['ica_export']:
         generate_ica(settings, model)
-    if settings['itp_export']:
-        generate_itp(settings, model)
-    # Generate the imd as last because the other files may have changed things.
-    if settings['imd_export']:
-        generate_imd(settings, model)
