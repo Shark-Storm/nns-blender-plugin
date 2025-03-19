@@ -11,12 +11,13 @@ class NTR_PT_object(bpy.types.Panel):
     bl_options = {'HIDE_HEADER'}
 
     def draw(self, context):
-        layout = self.layout
-        obj = context.object
-        layout = layout.box()
-        title = layout.column()
-        title.box().label(text="NNS Object Options")
-        layout.prop(obj, "nns_billboard")
+        # layout = self.layout
+        # obj = context.object
+        # layout = layout.box()
+        # title = layout.column()
+        # title.box().label(text="NNS Object Options")
+        # layout.prop(obj, "nns_billboard")
+        pass
 
 
 def object_register():
