@@ -1,5 +1,6 @@
 import bpy
 from mathutils import Quaternion
+from mathutils import Euler
 import xml.etree.ElementTree as ET
 from math import degrees
 from .nns_model import NitroModel
@@ -109,6 +110,36 @@ class NitroBCA():
             self.find_animation(node.index)
 
         for obj in bpy.context.view_layer.objects:
+            if obj.type != 'MESH':
+                continue
+            scene = bpy.context.scene
+            mtxs = []
+            frame_old = scene.frame_current
+            for frame in range(scene.frame_start, scene.frame_end + 1):
+                scene.frame_set(frame)
+
+                transforms = {}
+                transform = obj.matrix_world.copy()
+                if obj.parent:
+                    inv = obj.parent.matrix_world.inverted()
+                    transform = inv @ transform
+                else:
+                    R = Euler((-1.5708, 0, 0)).to_matrix().to_4x4()
+                    transform = R @ transform
+                transforms[obj.name] = transform
+                mtxs.append(transforms)
+
+                # Althought this was used in the sm64ds plugin, it doesn't
+                # work. You need to inverse multiply it with the parent
+                # logically.
+                # mtxs.append([b.matrix.copy() for b in obj.pose.bones])
+            scene.frame_set(frame_old)
+
+            self.info.set_frame_size(len(mtxs))
+            self.process_mesh_node(obj, [m[obj.name] for m in mtxs])
+
+        """
+        for obj in bpy.context.view_layer.objects:
             if obj.type != 'ARMATURE':
                 continue
             scene = bpy.context.scene
@@ -134,10 +165,13 @@ class NitroBCA():
 
             self.info.set_frame_size(len(mtxs))
             for i, bone in enumerate(obj.data.bones):
-                self.process_bone(bone, [m[bone.name] for m in mtxs])
+                self.process_bone(obj, [m[bone.name] for m in mtxs])
+        """
 
+        print("VAMOS A VER")
         # Set the proper data for each non-animated node.
         for animation in self.animations:
+            print("HOLAAAAAAA")
             node = self.model.nodes[animation.index]
             scale = {
                 'scale_x': round(node.scale[0], 6),
@@ -169,6 +203,57 @@ class NitroBCA():
                     result = self.translate_data.add_data([translate[key]])
                     animation.set_reference(key, result[0], result[1], 1)
 
+    def process_mesh_node(self, bone, transforms):
+        node = self.model.find_node(bone.name)
+        animation = self.find_animation(node.index)
+
+        mag = self.model.settings['imd_magnification']
+
+        scales = {'scale_x': [], 'scale_y': [], 'scale_z': []}
+        rotations = {'rotate_x': [], 'rotate_y': [], 'rotate_z': []}
+        trans = {'translate_x': [], 'translate_y': [], 'translate_z': []}
+
+        # Get frames.
+        for transform in transforms:
+            scale = transform.to_scale()
+            scales['scale_x'].append(round(scale[0], 6))
+            scales['scale_y'].append(round(scale[1], 6))
+            scales['scale_z'].append(round(scale[2], 6))
+
+            rotate = transform.to_euler('XYZ')
+            rotations['rotate_x'].append(round(degrees(rotate[0]), 6))
+            rotations['rotate_y'].append(round(degrees(rotate[1]), 6))
+            rotations['rotate_z'].append(round(degrees(rotate[2]), 6))
+
+            translate = transform.to_translation()
+            trans['translate_x'].append(round(translate[0] * mag, 6))
+            trans['translate_y'].append(round(translate[1] * mag, 6))
+            trans['translate_z'].append(round(translate[2] * mag, 6))
+
+        # Set scale frames.
+        for key in scales:
+            data, frame_step = self.process_curve(
+                scales[key],
+                settings['ica_scale_tolerance'])
+            result = self.scale_data.add_data(data)
+            animation.set_reference(key, result[0], result[1], frame_step)
+
+        # Set rotation frames.
+        for key in rotations:
+            data, frame_step = self.process_curve(
+                rotations[key],
+                settings['ica_rotate_tolerance'])
+            result = self.rotate_data.add_data(data)
+            animation.set_reference(key, result[0], result[1], frame_step)
+
+        # Set translation frames.
+        for key in trans:
+            data, frame_step = self.process_curve(
+                trans[key],
+                settings['ica_translate_tolerance'])
+            result = self.translate_data.add_data(data)
+            animation.set_reference(key, result[0], result[1], frame_step)
+    
     def process_bone(self, bone, transforms):
         node = self.model.find_node(bone.name)
         animation = self.find_animation(node.index)
