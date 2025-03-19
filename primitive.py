@@ -407,9 +407,7 @@ class Primitive():
 
             # Color
             if use_colors:
-                # Use special function to get color because the vertex colors
-                # may not align with the vertex loops.
-                color = get_color_from_obj(obj, idx)
+                color = obj.data.vertex_colors[0].data[idx].color
                 r = int(round(color[0] * 31))
                 g = int(round(color[1] * 31))
                 b = int(round(color[2] * 31))
@@ -467,7 +465,6 @@ class Primitive():
                         return first_j < j or (first_j == 2 and j == 0)
                     return first_j > j or (first_j == 0 and j == 2)
                 equal_count += 1
-        return False
 
     def is_suitable_tstrip_candidate_edge(self, candidate, a, b):
         equal_count = 0
