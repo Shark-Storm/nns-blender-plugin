@@ -1,6 +1,6 @@
 # Nintendo Nitro System Blender Plugin
 
-A plugin for blender 2.8 that is able to export intermediate model format (.imd) for use in homebrew projects or other NDS related activities.
+A plugin for blender 4.1 that is able to export intermediate model format (.imd) for use in homebrew projects or other NDS related activities.
 
 ## How to install
 
